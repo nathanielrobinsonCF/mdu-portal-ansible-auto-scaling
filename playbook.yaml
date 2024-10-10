@@ -1,0 +1,39 @@
+- hosts: localhost
+  become: true
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    app_env: "{{ lookup('aws_ssm', '/{{ project }}/{{ project_env }}/{{ service_name }}/laravel_env', bypath=true, shortnames=true, decrypt=true, recursive=true,region='eu-west-2') }}"
+    app_directory: "{{ lookup('aws_ssm', '/{{ project }}/{{ project_env }}/{{ service_name }}/app_directory', region='eu-west-2') }}"
+
+  tasks:
+    - name: "Ansible environment"
+      debug:
+        msg: |
+          Environment is {{ project_env }}
+
+    - name: Build env file
+      no_log: true
+      lineinfile:
+        path: "{{ app_directory }}/.env"
+        regex: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      with_dict:
+        - "{{ app_env }}"
+      register: env
+
+    - name: set env
+      lineinfile:
+        path: "{{app_directory}}/.env"
+        line: "ASG_TEST=true"
+
+    - name: Run artisan migrate
+      shell: 'php artisan migrate --force'
+      args:
+        chdir: "{{ app_directory }}"
+
+    - name: start supervisor
+      systemd:
+        state: started
+        name: supervisor
+        enabled: yes
