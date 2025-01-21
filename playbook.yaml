@@ -8,7 +8,7 @@
 
   tasks:
     - name: Build env file
-      no_log: True
+      no_log: False
       lineinfile:
         path: "{{ app_directory }}/.env"
         regex: "^{{ item.key }}="
