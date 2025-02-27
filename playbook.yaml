@@ -5,6 +5,8 @@
     ansible_python_interpreter: /usr/bin/python3
     app_env: "{{ lookup('aws_ssm', '{{ ssm_path }}laravel_env', bypath=true, shortnames=true, decrypt=true, recursive=true,region='eu-west-2') }}"
     app_directory: "{{ lookup('aws_ssm', '{{ ssm_path }}app_directory', region='eu-west-2') }}"
+    fsx_user: "{{ lookup('aws_ssm', '/{{ project }}/{{ project_env }}/{{ service_name }}/fsx_user') }}"
+    fsx_pass: "{{ lookup('aws_ssm', '/{{ project }}/{{ project_env }}/{{ service_name }}/fsx_pass') }}"
 
   tasks:
     - name: Build env file
@@ -16,10 +18,23 @@
       with_dict:
         - "{{  app_env|dict2items|rejectattr(\"key\", \"equalto\", \"key.pem\")|rejectattr(\"key\", \"equalto\", \"cert.pem\")|list|items2dict }}"
 
+   - name: Disable laravel error logging
+      lineinfile:
+        path: "{{app_directory}}/.env"
+        regex: "^APP_DEBUG="
+        line: "APP_DEBUG=false"
+      when: project_env == "staging"
+
     - name: Run artisan migrate
       shell: 'php artisan migrate --force --isolated'
       args:
         chdir: "{{ app_directory }}"
+
+    - name: Run one-time operations
+      shell: 'php artisan operations:process'
+      args:
+        chdir: "{{ app_directory }}"
+      when: (service_instance_number is defined and service_instance_number == 0) or (service_instance_number is not defined)
 
     - name: Limit amazon-cloudwatch-agent CPU
       no_log: True
@@ -41,3 +56,11 @@
         state: started
         name: supervisor
         enabled: yes
+
+      - name: mount fsx drive
+        mount:
+          state: mounted
+          fstype: cifs
+          path: /mnt/zdrive
+          src: //198.19.254.10/zdrive
+          opts: "ro,_netdev,username={{ fsx_user }},password={{ fsx_pass }},domain=ad.cityfibre.com"
